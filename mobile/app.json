@@ -1,0 +1,69 @@
+{
+  "expo": {
+    "name": "QRaksha",
+    "slug": "qraksha",
+    "scheme": "qraksha",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A1E3F"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.sohaparveen.qraksha",
+      "infoPlist": {
+        "NSCameraUsageDescription": "QRaksha needs camera access to scan UPI payment QR codes.",
+        "NSPhotoLibraryUsageDescription": "QRaksha needs gallery access to scan QR codes from your photos.",
+        "NSFaceIDUsageDescription": "QRaksha uses biometrics to securely unlock your wallet."
+      }
+    },
+    "android": {
+      "package": "com.sohaparveen.qraksha",
+      "adaptiveIcon": {
+        "backgroundColor": "#0A1E3F",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "QRaksha requires camera access to scan and analyze payment QR codes."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "QRaksha requires gallery access to inspect QR codes saved on your device."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow QRaksha to use biometric authentication for fast, secure access."
+        }
+      ],
+      "expo-secure-store",
+      "expo-sqlite"
+    ]
+  }
+}
