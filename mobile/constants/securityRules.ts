@@ -56,3 +56,4 @@ export const SUSPICIOUS_TLDS = [
   '.loan',
   '.work',
 ] as const;
+
