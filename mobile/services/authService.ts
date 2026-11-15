@@ -1,6 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { sha256 } from './crypto';
+import { pbkdf2 } from './crypto';
 import { PinValidationResult } from '../types';
 
 const KEY_LOGIN_PIN = 'qraksha_login_pin_hash';
@@ -8,9 +8,17 @@ const KEY_TX_PIN = 'qraksha_tx_pin_hash';
 const KEY_SALT = 'qraksha_salt';
 const KEY_FAILED_ATTEMPTS = 'qraksha_failed_attempts';
 const KEY_LOCKOUT_UNTIL = 'qraksha_lockout_until';
+const KEY_LOCKOUT_TIER = 'qraksha_lockout_tier';
 
 const MAX_FAILED_ATTEMPTS = 3;
-const LOCKOUT_DURATION_MS = 30 * 1000; // 30 seconds lockout
+const PBKDF2_ITERATIONS = 10000;
+
+// Progressive lockout schedule: 1st tier = 30s, 2nd tier = 60s, 3rd+ tier = 120s
+const getProgressiveLockoutDurationMs = (tier: number): number => {
+  if (tier <= 1) return 30 * 1000;
+  if (tier === 2) return 60 * 1000;
+  return 120 * 1000;
+};
 
 const getOrCreateSalt = async (): Promise<string> => {
   let salt = await SecureStore.getItemAsync(KEY_SALT);
@@ -34,19 +42,23 @@ export const hasTxPinSet = async (): Promise<boolean> => {
 export const setLoginPin = async (pin: string): Promise<boolean> => {
   if (!/^\d{4}$/.test(pin)) return false;
   const salt = await getOrCreateSalt();
-  const hash = sha256(`${pin}:${salt}`);
-  await SecureStore.setItemAsync(KEY_LOGIN_PIN, hash);
-  // Reset failure count on pin change
+  // Derive key using PBKDF2 with 10,000 iterations
+  const derivedKey = pbkdf2(pin, `${salt}:login`, PBKDF2_ITERATIONS);
+  await SecureStore.setItemAsync(KEY_LOGIN_PIN, derivedKey);
+
+  // Reset failure count & lockout tier on new pin creation
   await SecureStore.deleteItemAsync(KEY_FAILED_ATTEMPTS);
   await SecureStore.deleteItemAsync(KEY_LOCKOUT_UNTIL);
+  await SecureStore.deleteItemAsync(KEY_LOCKOUT_TIER);
   return true;
 };
 
 export const setTransactionPin = async (pin: string): Promise<boolean> => {
   if (!/^\d{4}$/.test(pin)) return false;
   const salt = await getOrCreateSalt();
-  const hash = sha256(`${pin}:${salt}:tx`);
-  await SecureStore.setItemAsync(KEY_TX_PIN, hash);
+  // Separate cryptographic salt domain for transaction PIN
+  const derivedKey = pbkdf2(pin, `${salt}:transaction`, PBKDF2_ITERATIONS);
+  await SecureStore.setItemAsync(KEY_TX_PIN, derivedKey);
   return true;
 };
 
@@ -61,7 +73,7 @@ export const getLockoutStatus = async (): Promise<{ isLocked: boolean; secondsRe
     const secondsRemaining = Math.ceil((lockoutUntil - now) / 1000);
     return { isLocked: true, secondsRemaining };
   } else {
-    // Lockout expired, clear it
+    // Lockout period expired; reset attempt counter
     await SecureStore.deleteItemAsync(KEY_LOCKOUT_UNTIL);
     await SecureStore.setItemAsync(KEY_FAILED_ATTEMPTS, '0');
     return { isLocked: false, secondsRemaining: 0 };
@@ -84,12 +96,13 @@ export const verifyLoginPin = async (pin: string): Promise<PinValidationResult> 
   }
 
   const salt = await getOrCreateSalt();
-  const inputHash = sha256(`${pin}:${salt}`);
+  const inputHash = pbkdf2(pin, `${salt}:login`, PBKDF2_ITERATIONS);
 
   if (inputHash === storedHash) {
-    // Reset failed attempts on success
+    // Reset failed attempts & lockout tier on successful authentication
     await SecureStore.setItemAsync(KEY_FAILED_ATTEMPTS, '0');
     await SecureStore.deleteItemAsync(KEY_LOCKOUT_UNTIL);
+    await SecureStore.deleteItemAsync(KEY_LOCKOUT_TIER);
     return { valid: true };
   } else {
     // Increment failed attempts
@@ -98,11 +111,19 @@ export const verifyLoginPin = async (pin: string): Promise<PinValidationResult> 
     await SecureStore.setItemAsync(KEY_FAILED_ATTEMPTS, failedCount.toString());
 
     if (failedCount >= MAX_FAILED_ATTEMPTS) {
-      const lockoutUntil = Date.now() + LOCKOUT_DURATION_MS;
+      // Determine progressive lockout tier (1, 2, or 3+)
+      const tierStr = await SecureStore.getItemAsync(KEY_LOCKOUT_TIER);
+      const currentTier = (parseInt(tierStr || '0', 10) || 0) + 1;
+      await SecureStore.setItemAsync(KEY_LOCKOUT_TIER, currentTier.toString());
+
+      const durationMs = getProgressiveLockoutDurationMs(currentTier);
+      const lockoutUntil = Date.now() + durationMs;
       await SecureStore.setItemAsync(KEY_LOCKOUT_UNTIL, lockoutUntil.toString());
+
+      const seconds = Math.ceil(durationMs / 1000);
       return {
         valid: false,
-        error: 'Too many failed attempts. Temporary 30s lockout activated.',
+        error: `Too many failed attempts. Progressive ${seconds}s lockout activated.`,
         attemptsRemaining: 0,
       };
     }
@@ -120,7 +141,7 @@ export const verifyTransactionPin = async (pin: string): Promise<boolean> => {
   if (!storedHash) return false;
 
   const salt = await getOrCreateSalt();
-  const inputHash = sha256(`${pin}:${salt}:tx`);
+  const inputHash = pbkdf2(pin, `${salt}:transaction`, PBKDF2_ITERATIONS);
   return inputHash === storedHash;
 };
 

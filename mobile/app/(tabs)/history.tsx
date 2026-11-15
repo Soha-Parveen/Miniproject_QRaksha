@@ -16,7 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { TransactionCard } from '../../components/TransactionCard';
 import { SafetyBadge } from '../../components/SafetyBadge';
-import { getAllTransactions } from '../../database/transactionRepo';
+import { getAllTransactions, DateRangeFilter } from '../../database/transactionRepo';
 import { PaymentTransaction } from '../../types';
 import { COLORS, SPACING, RADIUS, SHADOWS } from '../../constants/theme';
 
@@ -26,16 +26,17 @@ export default function HistoryScreen() {
   const [transactions, setTransactions] = useState<PaymentTransaction[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'SUCCESS' | 'BLOCKED'>('ALL');
+  const [dateFilter, setDateFilter] = useState<DateRangeFilter>('ALL');
   const [selectedTx, setSelectedTx] = useState<PaymentTransaction | null>(null);
 
   const loadTransactions = useCallback(() => {
     try {
-      const data = getAllTransactions(statusFilter, searchQuery);
+      const data = getAllTransactions(statusFilter, searchQuery, dateFilter);
       setTransactions(data);
     } catch (err) {
       console.warn('[History] Query error:', err);
     }
-  }, [statusFilter, searchQuery]);
+  }, [statusFilter, searchQuery, dateFilter]);
 
   useFocusEffect(
     useCallback(() => {
@@ -66,7 +67,7 @@ export default function HistoryScreen() {
         )}
       </View>
 
-      {/* Filter Chips */}
+      {/* Status & Date Filter Chips */}
       <View style={styles.filtersRow}>
         {(['ALL', 'SUCCESS', 'BLOCKED'] as const).map((filter) => {
           const isActive = statusFilter === filter;
@@ -87,6 +88,29 @@ export default function HistoryScreen() {
           );
         })}
       </View>
+
+      {/* Date Range Chips */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateFilterScroll}>
+        {[
+          { key: 'ALL', label: 'All Dates' },
+          { key: 'TODAY', label: 'Today' },
+          { key: 'WEEK', label: 'Past 7 Days' },
+          { key: 'MONTH', label: 'Past 30 Days' },
+        ].map((d) => {
+          const isDateActive = dateFilter === d.key;
+          return (
+            <TouchableOpacity
+              key={d.key}
+              style={[styles.dateChip, isDateActive && styles.dateChipActive]}
+              onPress={() => setDateFilter(d.key as DateRangeFilter)}
+            >
+              <Text style={[styles.dateChipText, isDateActive && styles.dateChipTextActive]}>
+                {d.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
 
       {/* Transaction List */}
       <FlatList
@@ -236,7 +260,34 @@ const styles = StyleSheet.create({
   filtersRow: {
     flexDirection: 'row',
     paddingHorizontal: SPACING.lg,
-    marginVertical: SPACING.md,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.xs,
+  },
+  dateFilterScroll: {
+    paddingHorizontal: SPACING.lg,
+    marginBottom: SPACING.sm,
+  },
+  dateChip: {
+    paddingVertical: 4,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.full,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginRight: SPACING.xs,
+  },
+  dateChipActive: {
+    backgroundColor: '#EEF2FF',
+    borderColor: COLORS.primary,
+  },
+  dateChipText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  dateChipTextActive: {
+    color: COLORS.primary,
+    fontWeight: '700',
   },
   filterChip: {
     paddingVertical: 6,

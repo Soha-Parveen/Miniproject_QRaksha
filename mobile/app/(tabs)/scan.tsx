@@ -8,6 +8,8 @@ import {
   Dimensions,
   ScrollView,
   Modal,
+  TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
@@ -16,8 +18,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getDemoContacts } from '../../database/contactRepo';
-import { DemoContact } from '../../types';
+import { loadAvailableContacts, UnifiedContact } from '../../services/contactService';
 import { COLORS, SPACING, RADIUS } from '../../constants/theme';
 
 const { width } = Dimensions.get('window');
@@ -31,14 +32,27 @@ export default function ScanScreen() {
   const [torch, setTorch] = useState(false);
   const [scanned, setScanned] = useState(false);
   const [contactsModalVisible, setContactsModalVisible] = useState(false);
-  const [demoContacts, setDemoContacts] = useState<DemoContact[]>([]);
+  const [contacts, setContacts] = useState<UnifiedContact[]>([]);
+  const [contactSearch, setContactSearch] = useState('');
+  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [hasDeviceAccess, setHasDeviceAccess] = useState(false);
 
   useEffect(() => {
-    try {
-      const contacts = getDemoContacts();
-      setDemoContacts(contacts);
-    } catch {}
+    fetchContacts(false);
   }, []);
+
+  const fetchContacts = async (requestDevice: boolean) => {
+    setLoadingContacts(true);
+    try {
+      const list = await loadAvailableContacts(requestDevice);
+      setContacts(list);
+      if (requestDevice) setHasDeviceAccess(true);
+    } catch (err) {
+      console.warn('[ScanScreen] Error loading contacts:', err);
+    } finally {
+      setLoadingContacts(false);
+    }
+  };
 
   const handleBarcodeScanned = ({ data }: { data: string }) => {
     if (scanned) return;
@@ -98,11 +112,11 @@ export default function ScanScreen() {
     });
   };
 
-  const handleSelectContact = (contact: DemoContact) => {
+  const handleSelectContact = (contact: UnifiedContact) => {
     setContactsModalVisible(false);
-    const simulatedQr = `upi://pay?pa=${contact.demoUpiId}&pn=${encodeURIComponent(
+    const simulatedQr = `upi://pay?pa=${contact.upiId}&pn=${encodeURIComponent(
       contact.name
-    )}&am=250.00&cu=INR&tn=Payment%20to%20contact`;
+    )}&am=250.00&cu=INR&tn=Payment%20to%20${encodeURIComponent(contact.name)}`;
 
     handleTestPayload(simulatedQr);
   };
@@ -235,7 +249,7 @@ export default function ScanScreen() {
         </ScrollView>
       </View>
 
-      {/* Demo Contacts Selection Modal */}
+      {/* Contact Selection Modal */}
       <Modal
         visible={contactsModalVisible}
         animationType="slide"
@@ -245,31 +259,75 @@ export default function ScanScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Select Demo Contact</Text>
+              <Text style={styles.modalTitle}>Select Payment Contact</Text>
               <TouchableOpacity onPress={() => setContactsModalVisible(false)}>
                 <MaterialCommunityIcons name="close" size={24} color={COLORS.textPrimary} />
               </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.contactList}>
-              {demoContacts.map((contact) => (
-                <TouchableOpacity
-                  key={contact.id}
-                  style={styles.contactItem}
-                  onPress={() => handleSelectContact(contact)}
-                >
-                  <View style={[styles.avatar, { backgroundColor: contact.avatarColor }]}>
-                    <Text style={styles.avatarText}>{contact.name.charAt(0)}</Text>
-                  </View>
-                  <View style={styles.contactInfo}>
-                    <Text style={styles.contactName}>{contact.name}</Text>
-                    <Text style={styles.contactUpi}>{contact.demoUpiId}</Text>
-                    <Text style={styles.contactPhone}>{contact.phoneNumber}</Text>
-                  </View>
-                  <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.textMuted} />
+            {/* Contact Search Input */}
+            <View style={styles.contactSearchBox}>
+              <MaterialCommunityIcons name="magnify" size={18} color={COLORS.textSecondary} />
+              <TextInput
+                style={styles.contactSearchInput}
+                placeholder="Search name or number..."
+                placeholderTextColor={COLORS.textMuted}
+                value={contactSearch}
+                onChangeText={setContactSearch}
+              />
+              {contactSearch.length > 0 && (
+                <TouchableOpacity onPress={() => setContactSearch('')}>
+                  <MaterialCommunityIcons name="close-circle" size={16} color={COLORS.textMuted} />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
+              )}
+            </View>
+
+            {/* Permission Prompt Banner if Device Contacts not loaded */}
+            {!hasDeviceAccess && (
+              <TouchableOpacity
+                style={styles.deviceAccessBanner}
+                onPress={() => fetchContacts(true)}
+              >
+                <MaterialCommunityIcons name="contacts" size={18} color={COLORS.primary} />
+                <Text style={styles.deviceAccessText}>
+                  + Load My Phone Contacts (Permission on-demand)
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {loadingContacts ? (
+              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
+            ) : (
+              <ScrollView style={styles.contactList}>
+                {contacts
+                  .filter((c) =>
+                    c.name.toLowerCase().includes(contactSearch.toLowerCase()) ||
+                    c.phoneNumber.includes(contactSearch)
+                  )
+                  .map((contact) => (
+                    <TouchableOpacity
+                      key={contact.id}
+                      style={styles.contactItem}
+                      onPress={() => handleSelectContact(contact)}
+                    >
+                      <View style={[styles.avatar, { backgroundColor: contact.avatarColor }]}>
+                        <Text style={styles.avatarText}>{contact.name.charAt(0)}</Text>
+                      </View>
+                      <View style={styles.contactInfo}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={styles.contactName}>{contact.name}</Text>
+                          <Text style={[styles.sourceBadge, contact.isDeviceContact ? styles.phoneBadge : styles.demoBadge]}>
+                            {contact.isDeviceContact ? 'PHONE' : 'DEMO'}
+                          </Text>
+                        </View>
+                        <Text style={styles.contactUpi}>{contact.upiId}</Text>
+                        <Text style={styles.contactPhone}>{contact.phoneNumber}</Text>
+                      </View>
+                      <MaterialCommunityIcons name="chevron-right" size={22} color={COLORS.textMuted} />
+                    </TouchableOpacity>
+                  ))}
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -452,6 +510,57 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: COLORS.textPrimary,
+  },
+  contactSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.background,
+    borderRadius: RADIUS.md,
+    paddingHorizontal: SPACING.md,
+    height: 42,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+    marginBottom: SPACING.sm,
+  },
+  contactSearchInput: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: COLORS.textPrimary,
+  },
+  deviceAccessBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: RADIUS.md,
+    borderWidth: 1,
+    borderColor: '#C7D2FE',
+    marginBottom: SPACING.sm,
+  },
+  deviceAccessText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.primary,
+    marginLeft: 8,
+  },
+  sourceBadge: {
+    fontSize: 9,
+    fontWeight: '800',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: RADIUS.sm,
+    marginLeft: 6,
+    overflow: 'hidden',
+  },
+  phoneBadge: {
+    backgroundColor: '#DCFCE7',
+    color: '#15803D',
+  },
+  demoBadge: {
+    backgroundColor: '#FEF3C7',
+    color: '#B45309',
   },
   modalOverlay: {
     flex: 1,

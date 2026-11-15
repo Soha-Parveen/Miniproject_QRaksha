@@ -1,86 +1,214 @@
 /**
- * Lightweight standard SHA-256 implementation for React Native / offline crypto.
+ * Cryptographic Utility for QRaksha
+ * Implements PBKDF2-HMAC-SHA256 for secure PIN key derivation
+ * with 10,000 iterations and cryptographically random salts.
  */
+
+// --- SHA-256 Core ---
 function rightRotate(value: number, amount: number): number {
   return (value >>> amount) | (value << (32 - amount));
 }
 
-export function sha256(ascii: string): string {
-  const mathPow = Math.pow;
-  const maxWord = mathPow(2, 32);
-  let i = 0;
-  let j = 0;
-  let result = '';
+const K = [
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0x0bef9a3f, 0xc67178f2,
+];
 
-  const words: number[] = [];
-  const asciiBitLength = ascii.length * 8;
+function sha256Raw(bytes: Uint8Array): Uint8Array {
+  const bitLength = bytes.length * 8;
+  const newByteLen = (((bytes.length + 8) >> 6) + 1) << 6;
+  const padded = new Uint8Array(newByteLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
 
-  let hash = [
-    0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-    0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
-  ];
+  // Append 64-bit length in big-endian
+  const view = new DataView(padded.buffer);
+  view.setUint32(newByteLen - 4, bitLength, false);
 
-  const k = [
-    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
-    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
-    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
-    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
-    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
-    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0x0bef9a3f, 0xc67178f2,
-  ];
-
-  for (i = 0; i < ascii.length; i++) {
-    const code = ascii.charCodeAt(i);
-    words[i >> 2] |= (code & 0xff) << ((3 - (i % 4)) * 8);
+  const words = new Uint32Array(newByteLen >> 2);
+  for (let i = 0; i < words.length; i++) {
+    words[i] = view.getUint32(i * 4, false);
   }
 
-  words[asciiBitLength >> 5] |= 0x80 << (24 - (asciiBitLength % 32));
-  words[(((asciiBitLength + 64) >> 9) << 4) + 15] = asciiBitLength;
+  let h0 = 0x6a09e667;
+  let h1 = 0xbb67ae85;
+  let h2 = 0x3c6ef372;
+  let h3 = 0xa54ff53a;
+  let h4 = 0x510e527f;
+  let h5 = 0x9b05688c;
+  let h6 = 0x1f83d9ab;
+  let h7 = 0x5be0cd19;
 
-  const w: number[] = new Array(64);
+  const w = new Uint32Array(64);
 
-  for (i = 0; i < words.length; i += 16) {
-    const oldHash = [...hash];
-
-    for (j = 0; j < 64; j++) {
-      if (j < 16) {
-        w[j] = words[i + j] | 0;
-      } else {
-        const s0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
-        const s1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
-        w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
-      }
-
-      const s1 = rightRotate(hash[4], 6) ^ rightRotate(hash[4], 11) ^ rightRotate(hash[4], 25);
-      const ch = (hash[4] & hash[5]) ^ (~hash[4] & hash[6]);
-      const temp1 = (hash[7] + s1 + ch + k[j] + w[j]) | 0;
-      const s0 = rightRotate(hash[0], 2) ^ rightRotate(hash[0], 13) ^ rightRotate(hash[0], 22);
-      const maj = (hash[0] & hash[1]) ^ (hash[0] & hash[2]) ^ (hash[1] & hash[2]);
-      const temp2 = (s0 + maj) | 0;
-
-      hash[7] = hash[6];
-      hash[6] = hash[5];
-      hash[5] = hash[4];
-      hash[4] = (hash[3] + temp1) | 0;
-      hash[3] = hash[2];
-      hash[2] = hash[1];
-      hash[1] = hash[0];
-      hash[0] = (temp1 + temp2) | 0;
+  for (let i = 0; i < words.length; i += 16) {
+    for (let j = 0; j < 16; j++) {
+      w[j] = words[i + j];
+    }
+    for (let j = 16; j < 64; j++) {
+      const s0 = rightRotate(w[j - 15], 7) ^ rightRotate(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+      const s1 = rightRotate(w[j - 2], 17) ^ rightRotate(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) >>> 0;
     }
 
-    for (j = 0; j < 8; j++) {
-      hash[j] = (hash[j] + oldHash[j]) | 0;
+    let a = h0;
+    let b = h1;
+    let c = h2;
+    let d = h3;
+    let e = h4;
+    let f = h5;
+    let g = h6;
+    let h = h7;
+
+    for (let j = 0; j < 64; j++) {
+      const s1 = rightRotate(e, 6) ^ rightRotate(e, 11) ^ rightRotate(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const temp1 = (h + s1 + ch + K[j] + w[j]) >>> 0;
+      const s0 = rightRotate(a, 2) ^ rightRotate(a, 13) ^ rightRotate(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const temp2 = (s0 + maj) >>> 0;
+
+      h = g;
+      g = f;
+      f = e;
+      e = (d + temp1) >>> 0;
+      d = c;
+      c = b;
+      b = a;
+      a = (temp1 + temp2) >>> 0;
     }
+
+    h0 = (h0 + a) >>> 0;
+    h1 = (h1 + b) >>> 0;
+    h2 = (h2 + c) >>> 0;
+    h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0;
+    h5 = (h5 + f) >>> 0;
+    h6 = (h6 + g) >>> 0;
+    h7 = (h7 + h) >>> 0;
   }
 
-  for (i = 0; i < 8; i++) {
-    for (j = 3; j >= 0; j--) {
-      const byte = (hash[i] >> (j * 8)) & 255;
-      result += (byte < 16 ? '0' : '') + byte.toString(16);
-    }
-  }
+  const result = new Uint8Array(32);
+  const outView = new DataView(result.buffer);
+  outView.setUint32(0, h0, false);
+  outView.setUint32(4, h1, false);
+  outView.setUint32(8, h2, false);
+  outView.setUint32(12, h3, false);
+  outView.setUint32(16, h4, false);
+  outView.setUint32(20, h5, false);
+  outView.setUint32(24, h6, false);
+  outView.setUint32(28, h7, false);
 
   return result;
+}
+
+function stringToUtf8(str: string): Uint8Array {
+  const bytes: number[] = [];
+  for (let i = 0; i < str.length; i++) {
+    let charCode = str.charCodeAt(i);
+    if (charCode < 0x80) {
+      bytes.push(charCode);
+    } else if (charCode < 0x800) {
+      bytes.push(0xc0 | (charCode >> 6), 0x80 | (charCode & 0x3f));
+    } else {
+      bytes.push(0xe0 | (charCode >> 12), 0x80 | ((charCode >> 6) & 0x3f), 0x80 | (charCode & 0x3f));
+    }
+  }
+  return new Uint8Array(bytes);
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  let hex = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const byte = bytes[i];
+    hex += (byte < 16 ? '0' : '') + byte.toString(16);
+  }
+  return hex;
+}
+
+// --- HMAC-SHA256 ---
+function hmacSha256(key: Uint8Array, message: Uint8Array): Uint8Array {
+  const blockSize = 64; // SHA-256 block size is 64 bytes
+  let k = new Uint8Array(blockSize);
+
+  if (key.length > blockSize) {
+    const hashedKey = sha256Raw(key);
+    k.set(hashedKey);
+  } else {
+    k.set(key);
+  }
+
+  const oPad = new Uint8Array(blockSize);
+  const iPad = new Uint8Array(blockSize);
+
+  for (let i = 0; i < blockSize; i++) {
+    oPad[i] = k[i] ^ 0x5c;
+    iPad[i] = k[i] ^ 0x36;
+  }
+
+  // Inner hash: SHA256(iPad || message)
+  const innerMsg = new Uint8Array(blockSize + message.length);
+  innerMsg.set(iPad);
+  innerMsg.set(message, blockSize);
+  const innerHash = sha256Raw(innerMsg);
+
+  // Outer hash: SHA256(oPad || innerHash)
+  const outerMsg = new Uint8Array(blockSize + 32);
+  outerMsg.set(oPad);
+  outerMsg.set(innerHash, blockSize);
+
+  return sha256Raw(outerMsg);
+}
+
+/**
+ * Standard PBKDF2-HMAC-SHA256 implementation
+ * @param password The user PIN
+ * @param salt The unique cryptographic salt
+ * @param iterations Standard work factor (default: 10,000)
+ * @param keyLen Key length in bytes (default: 32 for 256 bits)
+ */
+export function pbkdf2(
+  password: string,
+  salt: string,
+  iterations: number = 10000,
+  keyLen: number = 32
+): string {
+  const pwBytes = stringToUtf8(password);
+  const saltBytes = stringToUtf8(salt);
+
+  // For 32-byte keyLen, 1 block (l = 1) is sufficient for SHA-256 (32 bytes)
+  const blockIndex = new Uint8Array(4);
+  blockIndex[3] = 1; // Block index 1 in big-endian
+
+  // U_1 = HMAC(password, salt || blockIndex)
+  const saltAndBlock = new Uint8Array(saltBytes.length + 4);
+  saltAndBlock.set(saltBytes);
+  saltAndBlock.set(blockIndex, saltBytes.length);
+
+  let u = hmacSha256(pwBytes, saltAndBlock);
+  const result = new Uint8Array(u);
+
+  // U_2 ... U_c
+  for (let i = 1; i < iterations; i++) {
+    u = hmacSha256(pwBytes, u);
+    for (let k = 0; k < result.length; k++) {
+      result[k] ^= u[k];
+    }
+  }
+
+  return bytesToHex(result.slice(0, keyLen));
+}
+
+/**
+ * Standard SHA-256 helper for compatibility and rapid data hashing
+ */
+export function sha256(ascii: string): string {
+  const bytes = stringToUtf8(ascii);
+  return bytesToHex(sha256Raw(bytes));
 }

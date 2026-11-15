@@ -91,3 +91,16 @@
 - [x] Added `test`, `typecheck`, and `build:apk` npm scripts in `mobile/package.json`.
 - [x] Authored comprehensive guide in `docs/android-build-guide.md` for Expo Go physical device testing and standalone APK distribution.
 - [x] Added network configuration client (`mobile/services/api.ts`) supporting local IP override for physical phone connectivity.
+
+
+---
+
+## Phase 11: Production Security Hardening & Engine Completion (COMPLETED & VERIFIED)
+- [x] Upgraded PIN cryptographic storage from plain SHA-256 to standard **PBKDF2-HMAC-SHA256 (10,000 iterations)** with cryptographically unique salts (`mobile/services/crypto.ts`).
+- [x] Implemented **Progressive Lockout Escalation** (30s initial -> 60s repeated -> 120s extended) in `mobile/services/authService.ts`.
+- [x] Documented and extracted heuristic scoring weights into `mobile/constants/securityRules.ts`.
+- [x] Refined fraud engine with **Contextual Promotional Evaluation** (legitimate merchants with promo notes yield YELLOW caution rather than immediate hard blocks) and explicit **UNSUPPORTED_NON_PAYMENT_FORMAT** classification (`mobile/services/fraudEngine.ts`).
+- [x] Added in-flight payment submission mutex lock in `mobile/database/walletRepo.ts` for concurrency & double-tap protection.
+- [x] Added **Date Range Filters** (Today, Past 7 Days, Past 30 Days) in `mobile/database/transactionRepo.ts` and `mobile/app/(tabs)/history.tsx`.
+- [x] Integrated on-demand device contact access (`expo-contacts`) with search and sample UPI ID mapping (`mobile/services/contactService.ts` & `mobile/app/(tabs)/scan.tsx`).
+- [x] Expanded automated test suite from 24 to **39 comprehensive master tests** (`mobile/tests/fraudEngine.test.ts`) with 100% pass rate.

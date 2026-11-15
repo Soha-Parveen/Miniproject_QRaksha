@@ -1,6 +1,9 @@
 import { getDatabase } from './db';
 import { PaymentResult, ProcessPaymentParams, PaymentTransaction } from '../types';
 
+// In-flight concurrency & duplicate submission lock
+let isPaymentInFlight = false;
+
 export const getWalletBalance = (): number => {
   const db = getDatabase();
   const row = db.getFirstSync<{ balance: number }>('SELECT balance FROM wallet WHERE id = "default_wallet"');
@@ -21,59 +24,70 @@ export const addDemoFunds = (amountToAdd: number = 5000): number => {
 export const executeSimulatedPayment = (
   params: ProcessPaymentParams
 ): PaymentResult => {
-  const db = getDatabase();
-  const currentBalance = getWalletBalance();
-
-  // 1. Critical risk transactions must be blocked
-  if (params.riskCategory === 'RED') {
-    const txId = 'tx_blk_' + Math.random().toString(36).substring(2, 9);
-    const txRef = 'REF-BLK-' + Date.now().toString().slice(-8);
-
-    db.runSync(
-      `INSERT INTO transactions (
-        id, transaction_ref, receiver_name, upi_id, amount, currency,
-        transaction_note, risk_category, risk_score, risk_reasons, status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BLOCKED')`,
-      [
-        txId,
-        txRef,
-        params.receiverName,
-        params.upiId,
-        params.amount,
-        params.currency || 'INR',
-        params.transactionNote || 'Blocked high risk transaction',
-        params.riskCategory,
-        params.riskScore,
-        JSON.stringify(params.riskReasons),
-      ]
-    );
-
+  // 1. Guard against duplicate / concurrent submission (double-tap prevention)
+  if (isPaymentInFlight) {
     return {
       success: false,
-      code: 'BLOCKED_HIGH_RISK',
-      error: 'Transaction blocked because critical risk indicators were detected.',
+      code: 'UNKNOWN',
+      error: 'A payment is already being processed. Please wait.',
     };
   }
 
-  // 2. Validate wallet balance
-  if (currentBalance < params.amount) {
-    return {
-      success: false,
-      code: 'INSUFFICIENT_FUNDS',
-      error: `Insufficient wallet balance. Available: ₹${currentBalance.toLocaleString('en-IN')}, Required: ₹${params.amount.toLocaleString('en-IN')}`,
-    };
-  }
-
-  // 3. Execute atomic transaction
-  const txId = 'tx_' + Math.random().toString(36).substring(2, 10);
-  const txRef = 'REF' + Date.now().toString().slice(-8) + Math.floor(100 + Math.random() * 900);
-  const now = new Date().toISOString();
-
-  let transactionRecord: PaymentTransaction | null = null;
+  isPaymentInFlight = true;
 
   try {
+    const db = getDatabase();
+    const currentBalance = getWalletBalance();
+
+    // 2. Critical risk transactions must be blocked
+    if (params.riskCategory === 'RED') {
+      const txId = 'tx_blk_' + Math.random().toString(36).substring(2, 9);
+      const txRef = 'REF-BLK-' + Date.now().toString().slice(-8);
+
+      db.runSync(
+        `INSERT INTO transactions (
+          id, transaction_ref, receiver_name, upi_id, amount, currency,
+          transaction_note, risk_category, risk_score, risk_reasons, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'BLOCKED')`,
+        [
+          txId,
+          txRef,
+          params.receiverName,
+          params.upiId,
+          params.amount,
+          params.currency || 'INR',
+          params.transactionNote || 'Blocked high risk transaction',
+          params.riskCategory,
+          params.riskScore,
+          JSON.stringify(params.riskReasons),
+        ]
+      );
+
+      return {
+        success: false,
+        code: 'BLOCKED_HIGH_RISK',
+        error: 'Transaction blocked because critical risk indicators were detected.',
+      };
+    }
+
+    // 3. Validate wallet balance
+    if (currentBalance < params.amount) {
+      return {
+        success: false,
+        code: 'INSUFFICIENT_FUNDS',
+        error: `Insufficient wallet balance. Available: ₹${currentBalance.toLocaleString('en-IN')}, Required: ₹${params.amount.toLocaleString('en-IN')}`,
+      };
+    }
+
+    // 4. Execute atomic transaction (ACID rollback guarantee)
+    const txId = 'tx_' + Math.random().toString(36).substring(2, 10);
+    const txRef = 'REF' + Date.now().toString().slice(-8) + Math.floor(100 + Math.random() * 900);
+    const now = new Date().toISOString();
+
+    let transactionRecord: PaymentTransaction | null = null;
+
     db.withTransactionSync(() => {
-      // Decrement wallet balance
+      // Conditional decrement: balance update succeeds only if balance >= amount
       const updateResult = db.runSync(
         `UPDATE wallet 
          SET balance = balance - ?, updated_at = datetime('now')
@@ -85,7 +99,7 @@ export const executeSimulatedPayment = (
         throw new Error('Failed to deduct from wallet balance. Insufficient funds.');
       }
 
-      // Record transaction
+      // Record transaction receipt atomically with balance update
       db.runSync(
         `INSERT INTO transactions (
           id, transaction_ref, receiver_name, upi_id, amount, currency,
@@ -139,6 +153,8 @@ export const executeSimulatedPayment = (
       code: 'UNKNOWN',
       error: err.message || 'Payment execution failed.',
     };
+  } finally {
+    isPaymentInFlight = false;
   }
 };
 

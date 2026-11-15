@@ -1,6 +1,8 @@
 import { getDatabase } from './db';
 import { PaymentTransaction, TransactionStatus, RiskCategory } from '../types';
 
+export type DateRangeFilter = 'ALL' | 'TODAY' | 'WEEK' | 'MONTH';
+
 interface RawTransactionRow {
   id: string;
   transaction_ref: string;
@@ -44,7 +46,8 @@ const mapRowToTransaction = (row: RawTransactionRow): PaymentTransaction => {
 
 export const getAllTransactions = (
   statusFilter?: 'ALL' | 'SUCCESS' | 'BLOCKED',
-  searchQuery?: string
+  searchQuery?: string,
+  dateFilter?: DateRangeFilter
 ): PaymentTransaction[] => {
   const db = getDatabase();
   let query = 'SELECT * FROM transactions WHERE 1=1';
@@ -53,6 +56,16 @@ export const getAllTransactions = (
   if (statusFilter && statusFilter !== 'ALL') {
     query += ' AND status = ?';
     params.push(statusFilter);
+  }
+
+  if (dateFilter && dateFilter !== 'ALL') {
+    if (dateFilter === 'TODAY') {
+      query += ' AND created_at >= datetime("now", "start of day")';
+    } else if (dateFilter === 'WEEK') {
+      query += ' AND created_at >= datetime("now", "-7 days")';
+    } else if (dateFilter === 'MONTH') {
+      query += ' AND created_at >= datetime("now", "-30 days")';
+    }
   }
 
   if (searchQuery && searchQuery.trim().length > 0) {
