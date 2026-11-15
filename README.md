@@ -151,6 +151,19 @@ npx expo start
 ```
 Scan the displayed QR code with the **Expo Go** app on your Android phone (ensure phone and PC are on the same Wi-Fi network).
 
+### 4. Running Automated Tests
+To run the automated 24-test QA fraud engine verification suite:
+```bash
+npm test
+```
+
+### 5. Building Standalone Android APK (.apk)
+To generate an installable `.apk` for your physical Android device:
+```bash
+npm run build:apk
+```
+For detailed step-by-step instructions on sideloading and installing the APK, see the [Android Build Guide](docs/android-build-guide.md).
+
 ---
 
 ## 🛡️ Security Best Practices Enforced

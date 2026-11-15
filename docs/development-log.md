@@ -81,5 +81,13 @@
 - [x] Automated test runner (`mobile/tests/fraudEngine.test.ts`):
   - 24 / 24 test cases passed (100% pass rate).
 - [x] TypeScript verification:
-  - `mobile/`: 0 compiler errors.
-  - `backend/`: 0 compiler errors.
+  - `mobile/`: 0 compiler errors (`npm run typecheck`).
+  - `backend/`: 0 compiler errors (`npm run build`).
+
+---
+
+## Phase 10: Android Build & Delivery Preparation (COMPLETED & VERIFIED)
+- [x] Configured EAS Build (`mobile/eas.json`) with `preview` profile specifying `"buildType": "apk"` for direct standalone Android installation.
+- [x] Added `test`, `typecheck`, and `build:apk` npm scripts in `mobile/package.json`.
+- [x] Authored comprehensive guide in `docs/android-build-guide.md` for Expo Go physical device testing and standalone APK distribution.
+- [x] Added network configuration client (`mobile/services/api.ts`) supporting local IP override for physical phone connectivity.
